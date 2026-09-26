@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ALMASOR Outage Monitoring</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--ink:#16202a;--mut:#64748b;--line:#e2e8f0;--g:#1e9e4a;--r:#d92d20;--o:#f59e0b;--b:#2563eb}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--ink:#e6edf5;--mut:#94a3b8;--line:#334155}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px system-ui,Segoe UI,sans-serif}
+header{background:var(--g);color:#fff;padding:14px 20px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+h1{margin:0;font-size:18px}.meta{font-size:12px;opacity:.95}
+main{padding:16px 20px;max-width:1500px;margin:auto}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.kpi b{display:block;font-size:34px;line-height:1.1}.kpi span{color:var(--mut);font-size:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin:12px 0}
+h3{margin:0 0 10px;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.row{display:grid;grid-template-columns:130px 1fr 36px;gap:8px;align-items:center;margin:5px 0;font-size:12px}
+.bar{height:10px;background:var(--line);border-radius:5px;overflow:hidden}.bar i{display:block;height:100%;background:var(--g)}
+.tools{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+input,select{padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
+.tw{overflow:auto;max-height:560px}table{border-collapse:collapse;width:100%;font-size:12.5px}
+th{position:sticky;top:0;background:var(--g);color:#fff;text-align:left;padding:7px 9px;white-space:nowrap}
+td{padding:6px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+.a3{color:var(--r);font-weight:600}.a2{color:var(--o);font-weight:600}
+.pill{padding:3px 9px;border-radius:99px;font-size:12px;background:#fff3;cursor:pointer}
+details{margin-top:12px}pre{white-space:pre-wrap;font-size:12px;margin:8px 0 0;max-height:220px;overflow:auto}
+</style></head><body>
+<header><h1>ALMASOR OUTAGE MONITORING &middot; NAP Down</h1>
+<div class="meta"><span id="upd">Loading…</span> &middot; auto-refresh <span id="nxt"></span>s &middot; <span class="pill" id="ag">Agent…</span></div></header>
+<main>
+<div class="kpis">
+ <div class="card kpi"><span>NAP DOWN (Final Status = Pending)</span><b id="k1" style="color:var(--r);font-size:48px">–</b></div>
+ <div class="card kpi"><span>Beyond 48 hrs SLA</span><b id="k2">–</b></div>
+ <div class="card kpi"><span>Within 48 hrs</span><b id="k3">–</b></div>
+ <div class="card kpi"><span>Within 24 hrs</span><b id="k4">–</b></div>
+ <div class="card kpi"><span>Average ageing</span><b id="k5">–</b></div>
+ <div class="card kpi"><span>Oldest</span><b id="k6">–</b></div>
+</div>
+<div class="grid">
+ <div class="card"><h3>By province</h3><div id="c1"></div></div>
+ <div class="card"><h3>By findings</h3><div id="c2"></div></div>
+ <div class="card"><h3>Ageing buckets</h3><div id="c3"></div></div>
+</div>
+<div class="card"><h3>Pending NAP list</h3>
+ <div class="tools"><input id="q" placeholder="Search NAP code, municipality…"><select id="fp"></select><select id="ff"></select><select id="fs"></select></div>
+ <div class="tw"><table><thead><tr><th>Province</th><th>Municipality</th><th>NAP Code</th><th>Date Endorsed</th><th>Duration</th><th>SLA</th><th>Findings</th><th>Team</th></tr></thead><tbody id="tb"></tbody></table></div>
+</div>
+<details class="card"><summary>Data agent log</summary><pre id="log"></pre></details>
+</main>
+<script>
+const REFRESH=30, SHEET_ID='1yhtm8pTJ9VP0TUrFm2JedYoCZ_M22K196luw3u9Xl4s';
+const $=s=>document.querySelector(s), MON={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+let ROWS=[], LOG=[], left=REFRESH;
+
+/* ---------- parsing ---------- */
+function parseCSV(t){const R=[];let r=[],c='',q=0;for(let i=0;i<t.length;i++){const h=t[i];
+ if(q){if(h=='"'){if(t[i+1]=='"'){c+='"';i++}else q=0}else c+=h}
+ else if(h=='"')q=1;else if(h==','){r.push(c);c=''}else if(h=='\n'){r.push(c);R.push(r);r=[];c=''}else if(h!='\r')c+=h}
+ if(c||r.length){r.push(c);R.push(r)}return R}
+function pd(s){s=(s||'').trim();if(!s)return null;
+ let m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ ,]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i),y,mo,d;
+ if(m){mo=+m[1]-1;d=+m[2];y=+m[3]}else{m=s.match(/^(\d{1,2})[- ]([A-Za-z]{3})[a-z]*[- ](\d{4})(?:[ ,]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i);
+  if(!m)return null;d=+m[1];mo=MON[m[2].toLowerCase()];y=+m[3]}
+ let h=+m[4]||0;if(m[7])h=h%12+(m[7].toUpperCase()=='PM'?12:0);
+ const dt=new Date(y,mo,d,h,+m[5]||0,+m[6]||0);return isNaN(dt)?null:dt}
+const HDR={ts:['timestamp'],grp:['concern group'],prov:['province'],mun:['municipality'],fac:['facility'],st:['nap status'],
+ rest:['date restored'],fin:['final status'],team:['dsp team'],endo:['date endorsed']};
+
+/* ---------- DATA AGENT: validate, clean, repair ---------- */
+function agent(raw){
+ const log=[],fix=(n,m)=>log.push(`FIXED  ${n}: ${m}`),warn=(n,m)=>log.push(`FLAG   ${n}: ${m}`);
+ let hi=raw.findIndex(r=>r.some(c=>/final status/i.test(c))&&r.some(c=>/date endorsed/i.test(c)));
+ if(hi<0){log.push('ERROR  header row not found (need FINAL STATUS + DATE ENDORSED)');return{rows:[],log,ok:false}}
+ const H=raw[hi].map(x=>x.trim().toLowerCase()),ix={};
+ for(const k in HDR){ix[k]=H.findIndex(h=>HDR[k].includes(h));if(ix[k]<0)warn('schema','column "'+HDR[k][0]+'" missing')}
+ const now=new Date(),clean=s=>(s||'').replace(/\s+/g,' ').trim().toUpperCase(),all=[];
+ for(let i=hi+1;i<raw.length;i++){const r=raw[i];if(!r.some(c=>c.trim()))continue;const n=i+1,g=k=>ix[k]>=0?r[ix[k]]||'':'';
+  const o={n,prov:clean(g('prov')),mun:clean(g('mun')),fac:clean(g('fac')),st:clean(g('st')),fin:clean(g('fin')),team:clean(g('team')),
+   endo:pd(g('endo')),rest:pd(g('rest')),ts:pd(g('ts')),flags:[]};
+  if(/^PEND/.test(o.fin)&&o.fin!='PENDING'){fix('row '+n,`final status "${o.fin}" -> PENDING`);o.fin='PENDING'}
+  if(!o.endo&&o.ts){o.endo=o.ts;fix('row '+n,'date endorsed missing -> used timestamp');o.flags.push('date fixed')}
+  all.push(o)}
+ // province repair: learn canonical names from data, fix typos / blanks via municipality map
+ const pc={},mp={};all.forEach(o=>{if(o.prov)pc[o.prov]=(pc[o.prov]||0)+1});
+ const canon=Object.keys(pc).filter(p=>pc[p]>=5);
+ all.forEach(o=>{if(o.prov&&o.mun&&canon.includes(o.prov)){(mp[o.mun]=mp[o.mun]||{})[o.prov]=(mp[o.mun][o.prov]||0)+1}});
+ const lev=(a,b)=>{const d=[...Array(a.length+1)].map((_,i)=>[i]);for(let j=1;j<=b.length;j++)d[0][j]=j;
+  for(let i=1;i<=a.length;i++)for(let j=1;j<=b.length;j++)d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]==b[j-1]?0:1));return d[a.length][b.length]};
+ all.forEach(o=>{if(!canon.includes(o.prov)){const near=o.prov&&canon.find(c=>lev(c,o.prov)<=2),m=mp[o.mun]&&Object.entries(mp[o.mun]).sort((a,b)=>b[1]-a[1])[0][0],to=near||m;
+  if(to){fix('row '+o.n,`province "${o.prov||'blank'}" -> ${to}`);o.prov=to}else warn('row '+o.n,'province unresolved')}});
+ const P=all.filter(o=>o.fin=='PENDING'),seen={};let dup=0;
+ P.forEach(o=>{
+  if(!o.endo){warn('row '+o.n,'pending but no valid endorsed date - excluded from ageing');o.age=null;o.flags.push('no date');return}
+  if(o.endo>now){warn('row '+o.n,'endorsed date in the future - ageing set to 0');o.endo=new Date(now);o.flags.push('future date')}
+  if(o.rest){warn('row '+o.n,'PENDING but has a restored date');o.flags.push('restored date set')}
+  if(!o.fac){warn('row '+o.n,'missing NAP code');o.flags.push('no NAP code')}
+  const k=o.fac+'|'+(o.endo&&+o.endo);if(seen[k]){dup++;warn('row '+o.n,'duplicate of row '+seen[k]+' (kept, counted as in sheet)');o.flags.push('duplicate')}else seen[k]=o.n});
+ log.unshift(`SCAN   ${all.length} rows read, ${P.length} PENDING (NAP DOWN), ${log.filter(l=>l.startsWith('FIXED')).length} fixes, ${log.filter(l=>l.startsWith('FLAG')).length} flags`);
+ return{rows:P,log,ok:!log.some(l=>l.startsWith('ERROR')),dup}}
+
+/* ---------- metrics ---------- */
+const ageMs=o=>o.endo?Math.max(0,Date.now()-o.endo):null;
+const fmt=ms=>ms==null?'n/a':`${Math.floor(ms/864e5)} days ${Math.floor(ms%864e5/36e5)} hours`;
+const sla=ms=>{const d=Math.floor(ms/864e5);return d<=1?'1. within 24 hrs':d==2?'2. within 48 hrs':'3. beyond 48 hrs'};
+const bars=(el,map,color)=>{const e=Object.entries(map).sort((a,b)=>b[1]-a[1]),m=Math.max(1,...e.map(x=>x[1]));
+ $(el).innerHTML=e.map(([k,v])=>`<div class="row"><span title="${k}">${k}</span><div class="bar"><i style="width:${v/m*100}%;${color?'background:'+color:''}"></i></div><b>${v}</b></div>`).join('')};
+const cnt=(a,f)=>a.reduce((m,o)=>(m[f(o)]=(m[f(o)]||0)+1,m),{});
+function opts(id,label,vals){const s=$(id),cur=s.value;s.innerHTML=`<option value="">${label}</option>`+[...new Set(vals)].sort().map(v=>`<option>${v}</option>`).join('');s.value=cur}
+
+function render(){
+ const A=ROWS.filter(o=>o.endo),ms=A.map(ageMs);
+ $('#k1').textContent=ROWS.length;
+ const s=cnt(A,o=>sla(ageMs(o)));
+ $('#k2').textContent=s['3. beyond 48 hrs']||0;$('#k3').textContent=s['2. within 48 hrs']||0;$('#k4').textContent=s['1. within 24 hrs']||0;
+ $('#k5').textContent=ms.length?fmt(ms.reduce((a,b)=>a+b,0)/ms.length):'–';$('#k6').textContent=ms.length?fmt(Math.max(...ms)):'–';
+ bars('#c1',cnt(ROWS,o=>o.prov||'UNKNOWN'));bars('#c2',cnt(ROWS,o=>o.st||'UNSPECIFIED'),'var(--b)');
+ const bk=x=>{const d=x/864e5;return d<1?'< 24 hrs':d<3?'1-2 days':d<8?'3-7 days':d<15?'8-14 days':d<31?'15-30 days':'> 30 days'};
+ const b=cnt(A,o=>bk(ageMs(o))),ord=['< 24 hrs','1-2 days','3-7 days','8-14 days','15-30 days','> 30 days'];
+ bars('#c3',Object.fromEntries(ord.map(k=>[k,b[k]||0])),'var(--o)');
+ opts('#fp','All provinces',ROWS.map(o=>o.prov));opts('#ff','All findings',ROWS.map(o=>o.st));opts('#fs','All SLA',['1. within 24 hrs','2. within 48 hrs','3. beyond 48 hrs']);
+ const q=$('#q').value.trim().toUpperCase(),fp=$('#fp').value,ff=$('#ff').value,fs=$('#fs').value;
+ const L=ROWS.filter(o=>(!fp||o.prov==fp)&&(!ff||o.st==ff)&&(!fs||(o.endo&&sla(ageMs(o))==fs))&&(!q||(o.fac+o.mun+o.prov+o.st).includes(q))).sort((a,b)=>(ageMs(b)||0)-(ageMs(a)||0));
+ $('#tb').innerHTML=L.map(o=>{const m=ageMs(o),d=m==null?0:Math.floor(m/864e5),c=d>=3?'a3':d==2?'a2':'';
+  return`<tr><td>${o.prov}</td><td>${o.mun}</td><td>${o.fac}</td><td>${o.endo?o.endo.toLocaleString('en-PH'):''}</td><td class="${c}">${fmt(m)}</td><td>${m==null?'':sla(m)}</td><td>${o.st}</td><td>${o.team}</td></tr>`}).join('')}
+
+/* ---------- self-healing loader ---------- */
+async function get(url,tries=3){for(let i=0;i<tries;i++){try{const r=await fetch(url,{cache:'no-store'});const t=await r.text();
+ if(r.ok&&!t.trim().startsWith('<')&&!t.startsWith('{'))return t;throw new Error('HTTP '+r.status)}catch(e){if(i==tries-1)throw e;await new Promise(r=>setTimeout(r,800*2**i))}}}
+async function load(){
+ let t,src='api';
+ try{t=await get('/api/sheet')}catch(e1){try{src='direct';t=await get(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=DATABASE`,2)}
+  catch(e2){src='cache';t=localStorage.getItem('almasor_csv');LOG=['ERROR  live fetch failed (api + direct): '+e2.message,t?'RECOVER using last good cached data':'ERROR  no cache available'];$('#ag').textContent='Agent: offline (cached)'}}
+ if(t){const res=agent(parseCSV(t));if(src!='cache'){LOG=res.log;if(res.ok&&res.rows.length)localStorage.setItem('almasor_csv',t);$('#ag').textContent=`Agent: ${res.log.filter(l=>/^FIXED/.test(l)).length} fixed · ${res.log.filter(l=>/^FLAG/.test(l)).length} flagged`}
+  if(res.ok)ROWS=res.rows;$('#upd').textContent='Updated '+new Date().toLocaleString('en-PH')+' ('+src+')'}
+ $('#log').textContent=LOG.join('\n');render()}
+$('#ag').onclick=()=>document.querySelector('details').open=true;
+['#q','#fp','#ff','#fs'].forEach(s=>$(s).addEventListener('input',render));
+setInterval(()=>{left--;if(left<=0){left=REFRESH;load()}$('#nxt').textContent=left;if(left%10==0)render()},1000);
+load();
+</script></body></html>
